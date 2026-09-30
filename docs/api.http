@@ -1,0 +1,56 @@
+@base = http://127.0.0.1:8080
+@token = replace-with-access-token
+@taskID = replace-with-task-id
+
+### Health
+GET {{base}}/healthz
+
+### Register
+POST {{base}}/v1/auth/register
+Content-Type: application/json
+
+{"email":"alice@example.com","password":"long-password"}
+
+### Login: copy access_token into @token
+POST {{base}}/v1/auth/login
+Content-Type: application/json
+
+{"email":"alice@example.com","password":"long-password"}
+
+### Me
+GET {{base}}/v1/me
+Authorization: Bearer {{token}}
+
+### Create: copy id into @taskID
+POST {{base}}/v1/tasks
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"title":"テストを書く"}
+
+### List
+GET {{base}}/v1/tasks
+Authorization: Bearer {{token}}
+
+### Get
+GET {{base}}/v1/tasks/{{taskID}}
+Authorization: Bearer {{token}}
+
+### Rename
+PATCH {{base}}/v1/tasks/{{taskID}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"title":"リファクタリングする"}
+
+### Complete
+POST {{base}}/v1/tasks/{{taskID}}/complete
+Authorization: Bearer {{token}}
+
+### Delete
+DELETE {{base}}/v1/tasks/{{taskID}}
+Authorization: Bearer {{token}}
+
+### Logout
+POST {{base}}/v1/auth/logout
+Authorization: Bearer {{token}}

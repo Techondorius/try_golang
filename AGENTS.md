@@ -15,7 +15,7 @@ Go コマンドは必ず devbox 経由で実行してください。ホスト環
 - 依存関係の整理: `devbox run -- go mod tidy`
 
 `devbox shell` 内で Go コマンドを実行することもできます。
-`devbox.json` の `test` スクリプトは未設定のため、テストには上記のコマンドを使ってください。
+`devbox run test` でもテストを実行できます。`devbox run check` は race 検出付きテスト、静的チェック、ビルドを実行します。
 
 ## 変更時の方針
 

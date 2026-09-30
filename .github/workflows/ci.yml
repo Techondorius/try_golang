@@ -1,0 +1,29 @@
+name: Go checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jetify-com/devbox-install-action@v0.12.0
+        with:
+          devbox-version: 0.17.5
+          enable-cache: 'true'
+      - name: Verify module files
+        run: |
+          devbox run -- go mod tidy
+          git diff --exit-code -- go.mod go.sum
+      - name: Verify formatting
+        run: |
+          devbox run -- go fmt ./...
+          git diff --exit-code -- '*.go'
+      - name: Test, vet and build
+        run: devbox run check
