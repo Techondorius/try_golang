@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"try_golang/internal/application"
+	"try_golang/internal/domain"
 	"try_golang/internal/domain/account"
 	"try_golang/internal/domain/task"
 )
@@ -29,7 +30,7 @@ func newStore() *store {
 func (s *store) InsertUser(_ context.Context, u account.User) error {
 	for _, existing := range s.users {
 		if existing.Email() == u.Email() {
-			return application.ErrConflict
+			return domain.ErrConflict
 		}
 	}
 	s.users[u.ID()] = u
@@ -41,12 +42,12 @@ func (s *store) UserByEmail(_ context.Context, e account.Email) (account.User, e
 			return u, nil
 		}
 	}
-	return account.User{}, application.ErrNotFound
+	return account.User{}, domain.ErrNotFound
 }
 func (s *store) UserByID(_ context.Context, id string) (account.User, error) {
 	u, ok := s.users[id]
 	if !ok {
-		return u, application.ErrNotFound
+		return u, domain.ErrNotFound
 	}
 	return u, nil
 }
@@ -57,7 +58,7 @@ func (s *store) SaveSession(_ context.Context, session application.Session) erro
 func (s *store) FindSession(_ context.Context, hash string) (application.Session, error) {
 	v, ok := s.sessions[hash]
 	if !ok {
-		return v, application.ErrNotFound
+		return v, domain.ErrNotFound
 	}
 	return v, nil
 }
@@ -69,7 +70,7 @@ func (s *store) InsertTask(_ context.Context, v task.Task) error { s.tasks[v.ID(
 func (s *store) FindTask(_ context.Context, id string) (task.Task, error) {
 	v, ok := s.tasks[id]
 	if !ok {
-		return v, application.ErrNotFound
+		return v, domain.ErrNotFound
 	}
 	return v, nil
 }
@@ -99,7 +100,7 @@ func (s *store) DeleteTask(ctx context.Context, id, owner string) error {
 		return err
 	}
 	if v.OwnerID() != owner {
-		return application.ErrNotFound
+		return domain.ErrNotFound
 	}
 	delete(s.tasks, id)
 	return nil
@@ -142,7 +143,7 @@ func TestRegistrationLoginExpiryAndLogout(t *testing.T) {
 	if user.PasswordHash() == "long-password" {
 		t.Fatal("stored plaintext password")
 	}
-	if _, err = auth.RegisterUseCase(ctx, "alice@example.com", "long-password"); !errors.Is(err, application.ErrConflict) {
+	if _, err = auth.RegisterUseCase(ctx, "alice@example.com", "long-password"); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("duplicate: %v", err)
 	}
 	token, err := auth.LoginUseCase(ctx, "alice@example.com", "long-password")
@@ -210,16 +211,16 @@ func TestTaskOwnershipAndLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.GetUseCase(ctx, "bob", v.ID()); !errors.Is(err, application.ErrNotFound) {
+	if _, err = service.GetUseCase(ctx, "bob", v.ID()); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("foreign get: %v", err)
 	}
-	if _, err = service.RenameUseCase(ctx, "bob", v.ID(), "stolen"); !errors.Is(err, application.ErrNotFound) {
+	if _, err = service.RenameUseCase(ctx, "bob", v.ID(), "stolen"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("foreign rename: %v", err)
 	}
-	if _, err = service.CompleteUseCase(ctx, "bob", v.ID()); !errors.Is(err, application.ErrNotFound) {
+	if _, err = service.CompleteUseCase(ctx, "bob", v.ID()); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("foreign complete: %v", err)
 	}
-	if err = service.DeleteUseCase(ctx, "bob", v.ID()); !errors.Is(err, application.ErrNotFound) {
+	if err = service.DeleteUseCase(ctx, "bob", v.ID()); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("foreign delete: %v", err)
 	}
 	list, err := service.ListUseCase(ctx, "bob")
@@ -240,7 +241,7 @@ func TestTaskOwnershipAndLifecycle(t *testing.T) {
 	if err = service.DeleteUseCase(ctx, "alice", v.ID()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.GetUseCase(ctx, "alice", v.ID()); !errors.Is(err, application.ErrNotFound) {
+	if _, err = service.GetUseCase(ctx, "alice", v.ID()); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("deleted: %v", err)
 	}
 	if _, err = service.CreateUseCase(ctx, "", "title"); !errors.Is(err, application.ErrUnauthenticated) {

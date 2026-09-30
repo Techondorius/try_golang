@@ -1,4 +1,4 @@
-// Package memory は、application層の保存ポートをmapで実装するメモリアダプターです。
+// Package memory は、domain層の集約Repositoryとapplication層のセッション保存ポートをmapで実装するメモリアダプターです。
 //
 // Repositoryの契約と保存方式を切り離す例です。ユースケースがこのパッケージを
 // importする必要はなく、main.goからinterfaceを通して実装を渡します。
@@ -12,11 +12,12 @@ import (
 	"sync"
 
 	"try_golang/internal/application"
+	"try_golang/internal/domain"
 	"try_golang/internal/domain/account"
 	"try_golang/internal/domain/task"
 )
 
-// Store は、Users・Sessions・TaskRepositoryの三つのポートを満たす保存アダプターです。
+// Store は、IUsersRepository・ISessionsRepository・ITasksRepositoryの三つのポートを満たす保存アダプターです。
 //
 // 一つの具体型が複数のinterfaceを実装していても、ユースケースは必要なポートだけを使います。
 // mapはそのままでは同時読み書きできないため、RWMutexで読み取りと書き込みを保護します。
@@ -34,9 +35,9 @@ type Store struct {
 // 次の代入は実行時に使う値ではなく、interfaceを満たすかのコンパイル時チェックです。
 // ポートのメソッドが変更されたとき、アダプターの実装漏れをここで検出できます。
 var (
-	_ application.Users          = (*Store)(nil)
-	_ application.Sessions       = (*Store)(nil)
-	_ application.TaskRepository = (*Store)(nil)
+	_ account.IUsersRepository        = (*Store)(nil)
+	_ application.ISessionsRepository = (*Store)(nil)
+	_ task.ITasksRepository           = (*Store)(nil)
 )
 
 // New は、空の保存領域とセッション期限の確認に使うClockを持つStoreを生成します。
@@ -47,7 +48,7 @@ func New(now application.Clock) *Store {
 
 // InsertUser は、ID・メールの重複を確認してUserを保存します。
 // 確認から二つのmapへの登録まで同じ書き込みロック内で行うため、
-// 同時に同じメールを登録しても一件しか成功しません。重複時はapplication.ErrConflictです。
+// 同時に同じメールを登録しても一件しか成功しません。重複時はdomain.ErrConflictです。
 func (s *Store) InsertUser(ctx context.Context, user account.User) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -55,10 +56,10 @@ func (s *Store) InsertUser(ctx context.Context, user account.User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.emailIDs[user.Email().String()]; ok {
-		return application.ErrConflict
+		return domain.ErrConflict
 	}
 	if _, ok := s.users[user.ID()]; ok {
-		return application.ErrConflict
+		return domain.ErrConflict
 	}
 	s.users[user.ID()] = user
 	s.emailIDs[user.Email().String()] = user.ID()
@@ -67,7 +68,7 @@ func (s *Store) InsertUser(ctx context.Context, user account.User) error {
 
 // UserByEmail は、メールの索引を使ってUserのコピーを返します。
 // 全Userを順番に調べずIDを引けるように、InsertUserが索引も同時に更新します。
-// 未登録ならapplication.ErrNotFoundを返します。
+// 未登録ならdomain.ErrNotFoundを返します。
 func (s *Store) UserByEmail(ctx context.Context, email account.Email) (account.User, error) {
 	if err := ctx.Err(); err != nil {
 		return account.User{}, err
@@ -76,12 +77,12 @@ func (s *Store) UserByEmail(ctx context.Context, email account.Email) (account.U
 	defer s.mu.RUnlock()
 	id, ok := s.emailIDs[email.String()]
 	if !ok {
-		return account.User{}, application.ErrNotFound
+		return account.User{}, domain.ErrNotFound
 	}
 	return s.users[id], nil
 }
 
-// UserByID は、IDに対応するUserのコピーを返します。未存在ならapplication.ErrNotFoundです。
+// UserByID は、IDに対応するUserのコピーを返します。未存在ならdomain.ErrNotFoundです。
 // 読み取り専用のRLockを使うため、他の読み取りとは並行して実行できます。
 func (s *Store) UserByID(ctx context.Context, id string) (account.User, error) {
 	if err := ctx.Err(); err != nil {
@@ -91,13 +92,13 @@ func (s *Store) UserByID(ctx context.Context, id string) (account.User, error) {
 	defer s.mu.RUnlock()
 	user, ok := s.users[id]
 	if !ok {
-		return account.User{}, application.ErrNotFound
+		return account.User{}, domain.ErrNotFound
 	}
 	return user, nil
 }
 
 // SaveSession は、期限切れの記録を掃除してから新しいSessionを保存します。
-// 同じTokenHashの記録が残っていればapplication.ErrConflictです。
+// 同じTokenHashの記録が残っていればdomain.ErrConflictです。
 // 定期実行する掃除処理は持たず、新規ログインの保存時に不要な記録を取り除きます。
 func (s *Store) SaveSession(ctx context.Context, session application.Session) error {
 	if err := ctx.Err(); err != nil {
@@ -112,14 +113,14 @@ func (s *Store) SaveSession(ctx context.Context, session application.Session) er
 		}
 	}
 	if _, ok := s.sessions[session.TokenHash]; ok {
-		return application.ErrConflict
+		return domain.ErrConflict
 	}
 	s.sessions[session.TokenHash] = session
 	return nil
 }
 
 // FindSession は、トークンのハッシュに対応するSessionを返します。
-// ここでは有効期限を判定せず、未存在ならapplication.ErrNotFoundを返します。
+// ここでは有効期限を判定せず、未存在ならdomain.ErrNotFoundを返します。
 // 取得できたSessionが利用可能かどうかはAuth.Authenticateが確認します。
 func (s *Store) FindSession(ctx context.Context, hash string) (application.Session, error) {
 	if err := ctx.Err(); err != nil {
@@ -129,7 +130,7 @@ func (s *Store) FindSession(ctx context.Context, hash string) (application.Sessi
 	defer s.mu.RUnlock()
 	session, ok := s.sessions[hash]
 	if !ok {
-		return application.Session{}, application.ErrNotFound
+		return application.Session{}, domain.ErrNotFound
 	}
 	return session, nil
 }
@@ -148,7 +149,7 @@ func (s *Store) DeleteSession(ctx context.Context, hash string) error {
 }
 
 // InsertTask は、ドメインで生成したTaskをID単位で新規保存します。
-// 同じIDがあればapplication.ErrConflictを返し、既存の集約を上書きしません。
+// 同じIDがあればdomain.ErrConflictを返し、既存の集約を上書きしません。
 func (s *Store) InsertTask(ctx context.Context, item task.Task) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -156,13 +157,13 @@ func (s *Store) InsertTask(ctx context.Context, item task.Task) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.tasks[item.ID()]; ok {
-		return application.ErrConflict
+		return domain.ErrConflict
 	}
 	s.tasks[item.ID()] = item
 	return nil
 }
 
-// FindTask は、Taskのコピーを返します。未存在ならapplication.ErrNotFoundです。
+// FindTask は、Taskのコピーを返します。未存在ならdomain.ErrNotFoundです。
 // コピーのRenameやCompleteだけでは保存済みTaskは変わらず、UpdateTaskによる保存が必要です。
 // ここでは所有者を判定せず、取得後の認可はTasksユースケースが担当します。
 func (s *Store) FindTask(ctx context.Context, id string) (task.Task, error) {
@@ -173,7 +174,7 @@ func (s *Store) FindTask(ctx context.Context, id string) (task.Task, error) {
 	defer s.mu.RUnlock()
 	item, ok := s.tasks[id]
 	if !ok {
-		return task.Task{}, application.ErrNotFound
+		return task.Task{}, domain.ErrNotFound
 	}
 	return item, nil
 }
@@ -216,7 +217,7 @@ func (s *Store) UpdateTask(ctx context.Context, id string, change func(*task.Tas
 	defer s.mu.Unlock()
 	item, ok := s.tasks[id]
 	if !ok {
-		return task.Task{}, application.ErrNotFound
+		return task.Task{}, domain.ErrNotFound
 	}
 	if err := change(&item); err != nil {
 		return task.Task{}, err
@@ -227,7 +228,7 @@ func (s *Store) UpdateTask(ctx context.Context, id string, change func(*task.Tas
 }
 
 // DeleteTask は、所有者確認と削除を同じ書き込みロック内で行います。
-// 未存在と所有者不一致はapplication.ErrNotFoundです。完了状態は削除条件に含めません。
+// 未存在と所有者不一致はdomain.ErrNotFoundです。完了状態は削除条件に含めません。
 func (s *Store) DeleteTask(ctx context.Context, id, owner string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -236,7 +237,7 @@ func (s *Store) DeleteTask(ctx context.Context, id, owner string) error {
 	defer s.mu.Unlock()
 	item, ok := s.tasks[id]
 	if !ok || item.OwnerID() != owner {
-		return application.ErrNotFound
+		return domain.ErrNotFound
 	}
 	delete(s.tasks, id)
 	return nil

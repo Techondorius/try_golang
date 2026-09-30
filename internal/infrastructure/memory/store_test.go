@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"try_golang/internal/application"
+	"try_golang/internal/domain"
 	"try_golang/internal/domain/account"
 	"try_golang/internal/domain/task"
 	"try_golang/internal/infrastructure/memory"
@@ -31,7 +32,7 @@ func TestConcurrentRegistrationAndCompletion(t *testing.T) {
 			err = s.InsertUser(ctx, user)
 			if err == nil {
 				inserted.Add(1)
-			} else if !errors.Is(err, application.ErrConflict) {
+			} else if !errors.Is(err, domain.ErrConflict) {
 				t.Error(err)
 			}
 		})
@@ -81,13 +82,13 @@ func TestSnapshotsRollbackAndOwnership(t *testing.T) {
 	if saved.Title() != "original" {
 		t.Fatal("failed update persisted")
 	}
-	if err := s.DeleteTask(ctx, "task", "stranger"); !errors.Is(err, application.ErrNotFound) {
+	if err := s.DeleteTask(ctx, "task", "stranger"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatal(err)
 	}
-	if err := s.InsertTask(ctx, item); !errors.Is(err, application.ErrConflict) {
+	if err := s.InsertTask(ctx, item); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("duplicate task: %v", err)
 	}
-	if _, err := s.UpdateTask(ctx, "missing", func(*task.Task) error { t.Fatal("called missing task callback"); return nil }); !errors.Is(err, application.ErrNotFound) {
+	if _, err := s.UpdateTask(ctx, "missing", func(*task.Task) error { t.Fatal("called missing task callback"); return nil }); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatal(err)
 	}
 }
@@ -109,7 +110,7 @@ func TestListOrderAndSessionCleanup(t *testing.T) {
 	s.SaveSession(ctx, application.Session{TokenHash: "old", UserID: "u", ExpiresAt: now.Add(time.Minute)})
 	now = now.Add(time.Minute)
 	s.SaveSession(ctx, application.Session{TokenHash: "new", UserID: "u", ExpiresAt: now.Add(time.Minute)})
-	if _, err := s.FindSession(ctx, "old"); !errors.Is(err, application.ErrNotFound) {
+	if _, err := s.FindSession(ctx, "old"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expired session retained: %v", err)
 	}
 	if _, err := s.FindSession(ctx, "new"); err != nil {

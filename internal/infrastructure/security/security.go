@@ -1,5 +1,5 @@
 // Package security は、暗号処理と乱数生成を具体的なライブラリで実装するアダプターです。
-// ユースケースはPasswordsやGeneratorポートを使うため、この実装に直接依存しません。
+// ユースケースはIPasswordHasherやGeneratorポートを使うため、この実装に直接依存しません。
 package security
 
 import (
@@ -11,7 +11,7 @@ import (
 	"try_golang/internal/application"
 )
 
-// Bcrypt は、application.Passwordsポートをbcryptで満たすアダプターです。
+// Bcrypt は、application.IPasswordHasherポートをbcryptで満たすアダプターです。
 //
 // パスワードごとのランダムなソルトと計算コストはbcryptの生成結果に含まれます。
 // main.goは本番用のcost 12、テストは高速に実行できる最低costを選びます。
@@ -21,8 +21,8 @@ type Bcrypt struct {
 	Cost int
 }
 
-// BcryptがPasswordsポートを満たすことをコンパイル時に確認します。
-var _ application.Passwords = Bcrypt{}
+// BcryptがIPasswordHasherポートを満たすことをコンパイル時に確認します。
+var _ application.IPasswordHasher = Bcrypt{}
 
 // Hash は、ランダムなソルトを使い、平文パスワードをbcryptハッシュへ変換します。
 // 生成のたびにソルトが変わるため、同じパスワードでも文字列として同じハッシュにはなりません。

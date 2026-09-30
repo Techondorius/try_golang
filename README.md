@@ -43,20 +43,26 @@ flowchart LR
   Main[main.go: 依存注入] --> HTTP[transport/httpapi: Gin]
   Main --> Memory[infrastructure/memory]
   Main --> Security[infrastructure/security]
-  HTTP --> App[application: ユースケースとポート]
+  HTTP --> App[application: ユースケースと認証用ポート]
   Memory --> App
   Security --> App
-  App --> Domain[domain: account / task]
+  App --> Domain[domain: 集約・Repository契約・共通エラー]
+  HTTP --> Domain
   Memory --> Domain
 ```
 
-矢印はコード上の依存です。ユースケースが保存・パスワード照合・時刻・ID生成のポートを持ち、外側のアダプターを `main.go` が注入します。ドメインは標準ライブラリだけに依存します。`architecture_test.go` が逆向きの依存を検出します。
+矢印はコード上の依存です。User・Task集約のRepository interfaceは、集約と同じドメインに置きます。applicationはその契約を使い、infrastructureが実装し、`main.go` が注入します。認証セッション保存・パスワード照合・時刻・ID生成の技術的なポートはapplicationに置きます。ドメイン層の外部依存は標準ライブラリだけです。`architecture_test.go` が逆向きの依存とRepositoryの配置を検査します。
+
+Repositoryのinterfaceをドメインに置くのは、集約を扱う保存契約を業務モデル側に持たせるためです。具体的なDBへの保存方法はinfrastructureの責務です。この分け方は [MicrosoftのDDDガイド](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/infrastructure-persistence-layer-design) でも説明されています。Clean Architectureとしては内側のapplicationにポートを定義する設計も可能ですが、このサンプルはDDDの集約を基準に配置します。
+
+このリポジトリではinterfaceを見分けやすくするため、名前に `I` を付けます。これはこのサンプルの命名規約です。`IPasswordHasher` は保存を扱わないためRepositoryとは呼びません。`ISessionsRepository` は認証記録の保存ですが、このサンプルではSessionを業務集約として扱わないためapplicationに置きます。
 
 | ディレクトリ | 責務 |
 | --- | --- |
-| `internal/domain/account` | User集約、Email値オブジェクト、パスワード長のルール |
-| `internal/domain/task` | Task集約、Title値オブジェクト、完了・変更のルール |
-| `internal/application` | 登録・ログイン・失効、タスク操作、所有者チェック、外部依存のインターフェース |
+| `internal/domain` | 保存結果の共通エラー `ErrNotFound`・`ErrConflict` |
+| `internal/domain/account` | User集約、Email値オブジェクト、パスワード長のルール、`IUsersRepository` |
+| `internal/domain/task` | Task集約、Title値オブジェクト、完了・変更のルール、`ITasksRepository` |
+| `internal/application` | 登録・ログイン・失効、タスク操作、所有者チェック、`ISessionsRepository`・`IPasswordHasher`・時刻・ID生成のポート |
 | `internal/infrastructure/memory` | mutex付きRepositoryとセッション保存 |
 | `internal/infrastructure/security` | bcrypt、暗号学的乱数によるID・トークン生成 |
 | `internal/transport/httpapi` | Ginルーティング、認証ミドルウェア、DTO、HTTPエラー変換、回数制限 |
@@ -69,7 +75,7 @@ flowchart LR
 | 順番 | 読む場所 | 注目する点 |
 | --- | --- | --- |
 | 1 | [Task](internal/domain/task/task.go)、[Title](internal/domain/task/title.go)、[User](internal/domain/account/user.go) | 集約はIDで識別し、値オブジェクトは内容で比較する。状態変更のルールは集約に置く |
-| 2 | [applicationのポート](internal/application/ports.go) | ユースケースが外部へ要求する処理をinterfaceで表す。保存時の整合性も契約に含める |
+| 2 | [UserのRepository](internal/domain/account/repository.go)、[TaskのRepository](internal/domain/task/repository.go)、[認証用ポート](internal/application/ports.go) | 集約の保存契約と認証の技術的な契約を分ける。一意性・原子的な更新もRepositoryの契約に含める |
 | 3 | [Tasks](internal/application/tasks.go)、[Auth](internal/application/auth.go) | 入力検証・認証・認可・ドメイン操作・保存を組み合わせる |
 | 4 | [Store](internal/infrastructure/memory/store.go) | ポートの具体的な実装。コピーとロックで更新失敗・同時実行に対応する |
 | 5 | [HTTPハンドラー](internal/transport/httpapi/handlers.go)、[ミドルウェア](internal/transport/httpapi/middleware.go) | JSONとHTTPをユースケースへ接続する。GinのContextはこの層で扱う |
@@ -77,16 +83,18 @@ flowchart LR
 
 このリポジトリは**コンストラクターに依存を渡す手動のDI（依存性の注入）**を使います。`main.go` が `Store`、`Bcrypt`、時刻、乱数生成を `NewAuthUseCase` / `NewTasksUseCase` に渡し、そのユースケースを `NewRouter` に渡します。テストでは同じ入口へFakeを渡せます。
 
-DIは「必要な実装を呼び出し側から渡す方法」です。一方、依存性逆転は「ユースケースが具体的な保存方式をimportせず、自分が定義したポートへ依存する」という設計上の関係です。このサンプルでは両方を組み合わせています。
+DIは「必要な実装を呼び出し側から渡す方法」です。一方、依存性逆転は「ユースケースと保存アダプターが、内側のdomainやapplicationに定義された契約へ依存する」という設計上の関係です。このサンプルでは両方を組み合わせています。
 
-ユースケースの公開関数・メソッドは `RegisterUseCase`、`CreateUseCase` のように末尾を `UseCase` にしています。構築関数も `NewAuthUseCase` / `NewTasksUseCase` に統一しています。`Task.Complete` のようなドメイン操作や `TaskRepository.UpdateTask` のような保存契約と、アプリケーションの操作の入口を名前から見分けるための、このリポジトリの規約です。
+ユースケースの公開関数・メソッドは `RegisterUseCase`、`CreateUseCase` のように末尾を `UseCase` にしています。構築関数も `NewAuthUseCase` / `NewTasksUseCase` に統一しています。`Task.Complete` のようなドメイン操作や `ITasksRepository.UpdateTask` のような保存契約と、アプリケーションの操作の入口を名前から見分けるための、このリポジトリの規約です。
 
 ソースを開くほか、型やメソッドの説明をターミナルから読むこともできます。
 
 ```sh
 devbox run -- go doc -all ./internal/domain/task
 devbox run -- go doc -all ./internal/application
-devbox run -- go doc ./internal/application.TaskRepository
+devbox run -- go doc ./internal/domain/account.IUsersRepository
+devbox run -- go doc ./internal/domain/task.ITasksRepository
+devbox run -- go doc ./internal/application.ISessionsRepository
 devbox run -- go doc ./internal/application.Auth.LoginUseCase
 devbox run -- go doc ./internal/infrastructure/memory.Store.UpdateTask
 ```

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"try_golang/internal/domain"
 	"try_golang/internal/domain/account"
 )
 
@@ -17,13 +18,13 @@ import (
 // HTTPステータスやGinのContextを知らないため、CLIなど別の入口からも呼べます。
 // コンストラクターへ依存を渡す形が依存性の注入（DI）です。
 type Auth struct {
-	users     Users         // ユーザー集約の保存・検索先です。
-	sessions  Sessions      // セッションを保存し、ログアウト時に削除する窓口です。
-	passwords Passwords     // ハッシュの方式を隠す窓口です。
-	generate  Generator     // ユーザーIDと推測困難なトークンを生成します。
-	now       Clock         // 登録日時と期限の判定に使う時刻取得関数です。
-	ttl       time.Duration // ログイン時刻から有効期限までの期間です。
-	dummyHash string        // 未登録ユーザーにもハッシュ照合を行うための照合用データです。
+	users     account.IUsersRepository // ユーザー集約の保存・検索先です。
+	sessions  ISessionsRepository      // セッションを保存し、ログアウト時に削除する窓口です。
+	passwords IPasswordHasher          // ハッシュの方式を隠す窓口です。
+	generate  Generator                // ユーザーIDと推測困難なトークンを生成します。
+	now       Clock                    // 登録日時と期限の判定に使う時刻取得関数です。
+	ttl       time.Duration            // ログイン時刻から有効期限までの期間です。
+	dummyHash string                   // 未登録ユーザーにもハッシュ照合を行うための照合用データです。
 }
 
 // Token は、ログインに成功した呼び出し側へ返す認証結果です。
@@ -40,7 +41,7 @@ type Token struct {
 // ttlが正でない場合や、ダミーハッシュの準備に失敗した場合はエラーを返します。
 // 依存は全て利用可能な実装を渡してください。nil依存の検査は行いません。
 // ダミーハッシュは初期化時に一度作り、未登録ユーザーのログインでも照合処理を実行できるようにします。
-func NewAuthUseCase(users Users, sessions Sessions, passwords Passwords, generate Generator, now Clock, ttl time.Duration) (*Auth, error) {
+func NewAuthUseCase(users account.IUsersRepository, sessions ISessionsRepository, passwords IPasswordHasher, generate Generator, now Clock, ttl time.Duration) (*Auth, error) {
 	if ttl <= 0 {
 		return nil, fmt.Errorf("session TTL must be positive")
 	}
@@ -53,7 +54,7 @@ func NewAuthUseCase(users Users, sessions Sessions, passwords Passwords, generat
 
 // RegisterUseCase は、メールとパスワードを検証し、新しいUserを生成して保存します。
 //
-// メール・パスワードの不正はドメインのエラー、重複はErrConflictです。
+// メール・パスワードの不正はドメインのエラー、重複はdomain.ErrConflictです。
 // 保存層で一意性を保証するため、事前検索だけに頼らず同時登録にも対応します。
 // 暗号処理やID生成に失敗した場合は保存せず、原因を%wで包んで返します。
 // 呼び出し側はerrors.Isで原因を判定できます。登録だけではセッションを発行しません。
@@ -95,7 +96,7 @@ func (a *Auth) LoginUseCase(ctx context.Context, rawEmail, password string) (Tok
 		return Token{}, ErrUnauthenticated
 	}
 	user, err := a.users.UserByEmail(ctx, email)
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return Token{}, fmt.Errorf("find user: %w", err)
 	}
 	hash := a.dummyHash
@@ -130,7 +131,7 @@ func (a *Auth) AuthenticateUseCase(ctx context.Context, rawToken string) (accoun
 		return account.User{}, ErrUnauthenticated
 	}
 	session, err := a.sessions.FindSession(ctx, tokenHash(rawToken))
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, domain.ErrNotFound) {
 		return account.User{}, ErrUnauthenticated
 	}
 	if err != nil {
@@ -143,7 +144,7 @@ func (a *Auth) AuthenticateUseCase(ctx context.Context, rawToken string) (accoun
 		return account.User{}, ErrUnauthenticated
 	}
 	user, err := a.users.UserByID(ctx, session.UserID)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, domain.ErrNotFound) {
 		return account.User{}, ErrUnauthenticated
 	}
 	if err != nil {
@@ -154,7 +155,7 @@ func (a *Auth) AuthenticateUseCase(ctx context.Context, rawToken string) (accoun
 
 // LogoutUseCase は、指定トークンのセッションだけを削除します。同じUserの別セッションは維持します。
 //
-// 空のトークンはErrUnauthenticatedです。未存在の記録の削除はSessionsの契約上成功します。
+// 空のトークンはErrUnauthenticatedです。未存在の記録の削除はISessionsRepositoryの契約上成功します。
 // このメソッド自体は事前認証を行わないため、HTTP層ではauthenticateを通してから呼びます。
 // 保存層が削除に失敗した場合は、成功扱いにせずエラーを返します。
 func (a *Auth) LogoutUseCase(ctx context.Context, rawToken string) error {
@@ -169,7 +170,7 @@ func (a *Auth) LogoutUseCase(ctx context.Context, rawToken string) error {
 
 // tokenHash は、提示されたトークンをSessionの検索キーへ変換します。
 // トークンは十分な乱数を使う前提なのでSHA-256で扱い、利用者が選ぶパスワードの
-// ハッシュ化（Passwordsポート）とは方式を分けています。平文には戻せません。
+// ハッシュ化（IPasswordHasherポート）とは方式を分けています。平文には戻せません。
 func tokenHash(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -9,6 +10,42 @@ import (
 	"strings"
 	"testing"
 )
+
+// TestAggregateRepositoryPlacement は、集約の保存契約がドメインに定義されることを検証します。
+// 実装を移動するときにも、ドメインがapplicationやinfrastructureへ依存する形に戻さないための検査です。
+func TestAggregateRepositoryPlacement(t *testing.T) {
+	for _, repository := range []struct {
+		path string
+		name string
+	}{
+		{"internal/domain/account/repository.go", "IUsersRepository"},
+		{"internal/domain/task/repository.go", "ITasksRepository"},
+	} {
+		t.Run(repository.name, func(t *testing.T) {
+			source, err := parser.ParseFile(token.NewFileSet(), repository.path, nil, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, declaration := range source.Decls {
+				general, ok := declaration.(*ast.GenDecl)
+				if !ok {
+					continue
+				}
+				for _, spec := range general.Specs {
+					definition, ok := spec.(*ast.TypeSpec)
+					if !ok || definition.Name.Name != repository.name {
+						continue
+					}
+					if _, ok := definition.Type.(*ast.InterfaceType); !ok {
+						t.Fatalf("%s must be an interface", repository.name)
+					}
+					return
+				}
+			}
+			t.Fatalf("%s must be declared in %s", repository.name, repository.path)
+		})
+	}
+}
 
 // Keep dependency direction enforceable as the sample grows.
 func TestDependencyDirection(t *testing.T) {
@@ -30,11 +67,15 @@ func TestDependencyDirection(t *testing.T) {
 				return err
 			}
 			standard := !strings.Contains(strings.Split(imported, "/")[0], ".") && !strings.HasPrefix(imported, "try_golang/")
-			domain := strings.HasPrefix(imported, "try_golang/internal/domain/")
+			sharedDomain := imported == "try_golang/internal/domain"
+			domain := sharedDomain || strings.HasPrefix(imported, "try_golang/internal/domain/")
 			application := imported == "try_golang/internal/application"
 			allowed := standard
 			switch layer {
-			case "domain", "config":
+			case "domain":
+				// 集約間の依存を増やさず、Repositoryの共通エラーだけを共有します。
+				allowed = allowed || sharedDomain
+			case "config":
 			case "application":
 				allowed = allowed || domain
 			case "transport":

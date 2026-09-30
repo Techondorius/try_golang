@@ -31,6 +31,7 @@
 - [x] panicを500へ変換し、Bearerトークンやpanicの内容をログへ出さない
 - [x] 設定の不正なポートやセッション期限で起動を拒否する
 - [x] ドメインやユースケースから外側の層への依存を禁止する
+- [x] User・TaskのRepository interfaceを、それぞれの集約のドメインに置く
 - [x] 未定義の末尾スラッシュURLも、JSONの404として応答する
 
 ## 実際に確認したRed → Green
@@ -47,6 +48,7 @@
 | `config` | `no non-test Go files` | デフォルト値、待受アドレスと期限の検証を実装 |
 | Userの生成条件 | `assignment mismatch: 2 variables but account.NewUser returns 1 value` | 不正な集約を生成せずエラーを返すAPIに変更 |
 | 未定義URLの末尾スラッシュ | `status 301, want 404` | Ginの自動リダイレクトを無効にし、既存のJSON 404処理に統一 |
+| 集約Repositoryの配置 | `TestAggregateRepositoryPlacement` でドメインの `repository.go` が存在せず失敗 | `IUsersRepository`・`ITasksRepository` を各集約のドメインへ移動 |
 
 最初の環境では既存のGoキャッシュにより標準パッケージの解決に失敗しました。これは機能のRedとは区別し、別のビルドキャッシュで再実行してGreenを確認しました。その後 `devbox.json` にプロジェクト専用の `GOCACHE` を設定しています。
 
@@ -74,7 +76,7 @@ HTTPの動作テストを通した後、ルート登録・ハンドラー・ミ�
 - ユースケース: 保存・ハッシュ・時刻・IDをFakeへ差し替え、認証・所有者チェック・失敗時の振る舞いを検証
 - インフラ: 本物のメモリ保存とbcryptを使い、同時実行・値の隔離・ハッシュ照合を検証
 - HTTP: `httptest` から本物のGin・ユースケース・メモリ保存・bcryptを通し、応答とヘッダーを検証
-- アーキテクチャ: 本番ソースのimportを検査し、依存方向を検証
+- アーキテクチャ: 本番ソースのimportと集約Repositoryの宣言場所を検査し、依存方向と配置を検証
 
 ユースケースのテストでは時刻を固定し、期限切れまで実時間で待ちません。並行処理のテストは `sync.WaitGroup` と `atomic` を使います。HTTPテストのbcryptは最低costを使って高速化し、本番の起動コードはcost 12を使います。
 

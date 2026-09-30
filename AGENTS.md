@@ -36,5 +36,13 @@ Go コマンドは必ず devbox 経由で実行してください。ホスト環
 - `internal/application` のユースケースを表す公開関数・メソッド名には、末尾に `UseCase` を付けてください。
 - 例: `RegisterUseCase`、`LoginUseCase`、`CreateUseCase`、`CompleteUseCase`。
 - ユースケースの構築関数も `NewAuthUseCase`、`NewTasksUseCase` のようにそろえてください。
-- 集約や値オブジェクトの操作、保存ポートのメソッド、非公開の補助関数は対象外です。例: `Task.Rename`、`TaskRepository.UpdateTask`、`change`。
+- 集約や値オブジェクトの操作、保存ポートのメソッド、非公開の補助関数は対象外です。例: `Task.Rename`、`ITasksRepository.UpdateTask`、`change`。
 - 改名時は呼び出し元・テスト・コメント・READMEも更新し、古い名称を参照する説明を残さないでください。
+
+## Repositoryとポートの配置・命名
+
+- 業務上の集約のRepository interfaceは、その集約と同じドメインパッケージに置いてください。
+- このリポジトリではinterface名に `I` を付け、集約の保存契約は `IUsersRepository`、`ITasksRepository` のように命名してください。
+- 具体的な保存実装は `internal/infrastructure` に置き、ユースケースへコンストラクターで注入してください。
+- 認証セッションの保存は `application.ISessionsRepository`、パスワード処理は `application.IPasswordHasher` として、認証処理の技術的なポートをapplicationに置いてください。全てのinterfaceをRepositoryとは呼びません。
+- 保存結果の共通エラーは `internal/domain/errors.go` に定義し、ドメインからapplicationやinfrastructureへの依存を作らないでください。

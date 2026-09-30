@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"try_golang/internal/domain"
 	"try_golang/internal/domain/task"
 )
 
@@ -11,16 +12,16 @@ import (
 //
 // ownerには、入口の認証処理で確認したUserのIDを渡してください。
 // この型はトークン照合を行わず、所有者かどうかの認可とドメイン操作・保存を担当します。
-// ownerが空ならErrUnauthenticated、他人のTaskにはErrNotFoundを返します。
+// ownerが空ならErrUnauthenticated、他人のTaskにはdomain.ErrNotFoundを返します。
 type Tasks struct {
-	repo     TaskRepository // 集約の取得と原子的な変更を提供するポートです。
-	generate Generator      // 新規TaskのIDを生成します。
-	now      Clock          // 集約の作成・更新日時を供給します。
+	repo     task.ITasksRepository // 集約の取得と原子的な変更を提供するポートです。
+	generate Generator             // 新規TaskのIDを生成します。
+	now      Clock                 // 集約の作成・更新日時を供給します。
 }
 
 // NewTasksUseCase は、Repository・ID生成・時刻取得の実装を注入してTasksを組み立てます。
 // テストではFakeを渡し、本番ではmain.goが具体的なアダプターを選びます。
-func NewTasksUseCase(repo TaskRepository, generate Generator, now Clock) *Tasks {
+func NewTasksUseCase(repo task.ITasksRepository, generate Generator, now Clock) *Tasks {
 	return &Tasks{repo, generate, now}
 }
 
@@ -47,7 +48,7 @@ func (s *Tasks) CreateUseCase(ctx context.Context, owner, title string) (task.Ta
 
 // GetUseCase は、対象Taskを取得し、要求者が所有者であることを確認して返します。
 // 取得と認可をユースケースにまとめることで、HTTP以外の入口にも同じ制約を適用できます。
-// 対象の未存在と所有者不一致は、どちらもErrNotFoundとして扱います。
+// 対象の未存在と所有者不一致は、どちらもdomain.ErrNotFoundとして扱います。
 func (s *Tasks) GetUseCase(ctx context.Context, owner, id string) (task.Task, error) {
 	if owner == "" {
 		return task.Task{}, ErrUnauthenticated
@@ -57,7 +58,7 @@ func (s *Tasks) GetUseCase(ctx context.Context, owner, id string) (task.Task, er
 		return task.Task{}, err
 	}
 	if item.OwnerID() != owner {
-		return task.Task{}, ErrNotFound
+		return task.Task{}, domain.ErrNotFound
 	}
 	return item, nil
 }
@@ -92,7 +93,7 @@ func (s *Tasks) change(ctx context.Context, owner, id string, operation func(*ta
 	}
 	return s.repo.UpdateTask(ctx, id, func(item *task.Task) error {
 		if item.OwnerID() != owner {
-			return ErrNotFound
+			return domain.ErrNotFound
 		}
 		return operation(item)
 	})
@@ -100,7 +101,7 @@ func (s *Tasks) change(ctx context.Context, owner, id string, operation func(*ta
 
 // DeleteUseCase は、所有者であることを確認してTaskを削除します。完了済みのTaskも削除できます。
 // 所有者の確認と削除を一体で行うため、RepositoryのDeleteTaskへ依頼します。
-// 未存在と所有者不一致は、どちらもErrNotFoundです。
+// 未存在と所有者不一致は、どちらもdomain.ErrNotFoundです。
 func (s *Tasks) DeleteUseCase(ctx context.Context, owner, id string) error {
 	if owner == "" {
 		return ErrUnauthenticated

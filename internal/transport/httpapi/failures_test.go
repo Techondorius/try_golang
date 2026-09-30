@@ -16,9 +16,9 @@ import (
 )
 
 // failingSessionLookup は、セッション検索でエラーまたはpanicを起こすテスト用の差し替えです。
-// 他のメソッドは埋め込んだSessionsへ任せ、HTTP層の障害処理だけを検証します。
+// 他のメソッドは埋め込んだISessionsRepositoryへ任せ、HTTP層の障害処理だけを検証します。
 type failingSessionLookup struct {
-	application.Sessions
+	application.ISessionsRepository
 	panicInstead bool
 }
 

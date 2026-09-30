@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"try_golang/internal/application"
+	"try_golang/internal/domain"
 	"try_golang/internal/domain/account"
 	"try_golang/internal/domain/task"
 )
@@ -37,9 +38,9 @@ func fail(c *gin.Context, err error, logger *slog.Logger) {
 	switch {
 	case errors.Is(err, application.ErrUnauthenticated):
 		respondError(c, 401, "unauthenticated", "authentication required")
-	case errors.Is(err, application.ErrNotFound):
+	case errors.Is(err, domain.ErrNotFound):
 		respondError(c, 404, "not_found", "resource not found")
-	case errors.Is(err, application.ErrConflict):
+	case errors.Is(err, domain.ErrConflict):
 		respondError(c, 409, "conflict", "resource already exists")
 	case errors.Is(err, task.ErrCompleted):
 		respondError(c, 409, "task_completed", "completed task cannot be changed")
