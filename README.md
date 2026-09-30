@@ -62,6 +62,37 @@ flowchart LR
 | `internal/transport/httpapi` | Ginルーティング、認証ミドルウェア、DTO、HTTPエラー変換、回数制限 |
 | `internal/config` | 起動設定の読み込みと検証 |
 
+### コードの読み方と `go doc`
+
+初めて読む場合は、次の順番で「ルール」「操作の流れ」「外部との接続」を追うと役割を理解しやすくなります。各型・関数・interfaceには、日本語で責務・前提・エラー・設計の理由を記載しています。
+
+| 順番 | 読む場所 | 注目する点 |
+| --- | --- | --- |
+| 1 | [Task](internal/domain/task/task.go)、[Title](internal/domain/task/title.go)、[User](internal/domain/account/user.go) | 集約はIDで識別し、値オブジェクトは内容で比較する。状態変更のルールは集約に置く |
+| 2 | [applicationのポート](internal/application/ports.go) | ユースケースが外部へ要求する処理をinterfaceで表す。保存時の整合性も契約に含める |
+| 3 | [Tasks](internal/application/tasks.go)、[Auth](internal/application/auth.go) | 入力検証・認証・認可・ドメイン操作・保存を組み合わせる |
+| 4 | [Store](internal/infrastructure/memory/store.go) | ポートの具体的な実装。コピーとロックで更新失敗・同時実行に対応する |
+| 5 | [HTTPハンドラー](internal/transport/httpapi/handlers.go)、[ミドルウェア](internal/transport/httpapi/middleware.go) | JSONとHTTPをユースケースへ接続する。GinのContextはこの層で扱う |
+| 6 | [main.go](main.go) | 実装を選び、コンストラクターへ渡して全体を組み立てる |
+
+このリポジトリは**コンストラクターに依存を渡す手動のDI（依存性の注入）**を使います。`main.go` が `Store`、`Bcrypt`、時刻、乱数生成を `NewAuthUseCase` / `NewTasksUseCase` に渡し、そのユースケースを `NewRouter` に渡します。テストでは同じ入口へFakeを渡せます。
+
+DIは「必要な実装を呼び出し側から渡す方法」です。一方、依存性逆転は「ユースケースが具体的な保存方式をimportせず、自分が定義したポートへ依存する」という設計上の関係です。このサンプルでは両方を組み合わせています。
+
+ユースケースの公開関数・メソッドは `RegisterUseCase`、`CreateUseCase` のように末尾を `UseCase` にしています。構築関数も `NewAuthUseCase` / `NewTasksUseCase` に統一しています。`Task.Complete` のようなドメイン操作や `TaskRepository.UpdateTask` のような保存契約と、アプリケーションの操作の入口を名前から見分けるための、このリポジトリの規約です。
+
+ソースを開くほか、型やメソッドの説明をターミナルから読むこともできます。
+
+```sh
+devbox run -- go doc -all ./internal/domain/task
+devbox run -- go doc -all ./internal/application
+devbox run -- go doc ./internal/application.TaskRepository
+devbox run -- go doc ./internal/application.Auth.LoginUseCase
+devbox run -- go doc ./internal/infrastructure/memory.Store.UpdateTask
+```
+
+`-all` はパッケージの公開型とメソッドの説明をまとめて表示します。非公開のフィールド・補助関数にも、ソースを読むためのコメントを付けています。
+
 DDDの用語とルール:
 
 - **User** と **Task** はIDで識別する別々の集約です。Taskは所有者をIDで参照し、所有者の変更は提供しません。

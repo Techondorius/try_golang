@@ -20,22 +20,27 @@ import (
 	"try_golang/internal/transport/httpapi"
 )
 
+// setup は、本物のGin・ユースケース・メモリ保存・bcryptを接続したHTTPテスト環境を作ります。
+// 時計とbcryptのcostを制御しつつ、HTTP入口から各層が正しくつながることを確認します。
 func setup(t *testing.T) (*gin.Engine, *time.Time) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
 	clock := func() time.Time { return now }
 	s := memory.New(clock)
-	auth, err := application.NewAuth(s, s, security.Bcrypt{Cost: bcrypt.MinCost}, security.RandomID, clock, time.Hour)
+	auth, err := application.NewAuthUseCase(s, s, security.Bcrypt{Cost: bcrypt.MinCost}, security.RandomID, clock, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	router, err := httpapi.NewRouter(auth, application.NewTasks(s, security.RandomID, clock), httpapi.Options{Now: clock, AuthLimit: 100, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	router, err := httpapi.NewRouter(auth, application.NewTasksUseCase(s, security.RandomID, clock), httpapi.Options{Now: clock, AuthLimit: 100, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return router, &now
 }
+
+// request は、ネットワークの待受を行わず、http.Handlerへ直接リクエストを渡します。
+// httptestの記録先から、ステータス・ヘッダー・JSON本文を実際のHTTP処理の結果として検証できます。
 func request(router http.Handler, method, path, body, token string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.RemoteAddr = "192.0.2.1:1234"
@@ -49,12 +54,16 @@ func request(router http.Handler, method, path, body, token string) *httptest.Re
 	router.ServeHTTP(out, req)
 	return out
 }
+
+// wantStatus は、期待するHTTPステータスを確認し、不一致なら応答本文とともにテストを止めます。
 func wantStatus(t *testing.T, r *httptest.ResponseRecorder, status int) {
 	t.Helper()
 	if r.Code != status {
 		t.Fatalf("status %d, want %d: %s", r.Code, status, r.Body.String())
 	}
 }
+
+// object は、応答をJSONオブジェクトとして読み、公開された項目を検証できる形にします。
 func object(t *testing.T, r *httptest.ResponseRecorder) map[string]any {
 	t.Helper()
 	var out map[string]any
@@ -63,6 +72,9 @@ func object(t *testing.T, r *httptest.ResponseRecorder) map[string]any {
 	}
 	return out
 }
+
+// registerLogin は、HTTP経由でユーザーを登録し、ログインしたトークンを返します。
+// 保存層へ直接データを入れず、認証が必要なテストの準備でも公開APIの流れを使います。
 func registerLogin(t *testing.T, router http.Handler, email string) string {
 	t.Helper()
 	body := fmt.Sprintf(`{"email":%q,"password":"long-password"}`, email)

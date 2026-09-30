@@ -18,17 +18,19 @@ import (
 	"try_golang/internal/transport/httpapi"
 )
 
+// limitedRouter は、Clockと受付上限を注入したGinを作り、接続元IPを指定する要求関数を返します。
+// 転送元ヘッダーの値も別に指定し、実際の接続元と偽装できる入力を区別して検証します。
 func limitedRouter(t *testing.T, limit int) (*httpapi.Options, func(ip, forwarded string) *httptest.ResponseRecorder, *time.Time) {
 	t.Helper()
 	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
 	clock := func() time.Time { return now }
 	store := memory.New(clock)
-	auth, err := application.NewAuth(store, store, security.Bcrypt{Cost: bcrypt.MinCost}, security.RandomID, clock, time.Hour)
+	auth, err := application.NewAuthUseCase(store, store, security.Bcrypt{Cost: bcrypt.MinCost}, security.RandomID, clock, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	options := httpapi.Options{Now: clock, AuthLimit: limit, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	router, err := httpapi.NewRouter(auth, application.NewTasks(store, security.RandomID, clock), options)
+	router, err := httpapi.NewRouter(auth, application.NewTasksUseCase(store, security.RandomID, clock), options)
 	if err != nil {
 		t.Fatal(err)
 	}

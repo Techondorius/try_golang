@@ -15,11 +15,14 @@ import (
 	"try_golang/internal/transport/httpapi"
 )
 
+// failingSessionLookup は、セッション検索でエラーまたはpanicを起こすテスト用の差し替えです。
+// 他のメソッドは埋め込んだSessionsへ任せ、HTTP層の障害処理だけを検証します。
 type failingSessionLookup struct {
 	application.Sessions
 	panicInstead bool
 }
 
+// FindSession は、HTTP応答やログへ漏れてはいけない詳細を含む障害を意図的に発生させます。
 func (s failingSessionLookup) FindSession(context.Context, string) (application.Session, error) {
 	if s.panicInstead {
 		panic("sensitive-panic-detail")
@@ -31,12 +34,12 @@ func TestInternalFailuresReturnGenericJSONWithoutCredentials(t *testing.T) {
 	for _, panicInstead := range []bool{false, true} {
 		t.Run(map[bool]string{false: "storage failure", true: "panic"}[panicInstead], func(t *testing.T) {
 			store := memory.New(time.Now)
-			auth, err := application.NewAuth(store, failingSessionLookup{store, panicInstead}, security.Bcrypt{Cost: bcrypt.MinCost}, security.RandomID, time.Now, time.Hour)
+			auth, err := application.NewAuthUseCase(store, failingSessionLookup{store, panicInstead}, security.Bcrypt{Cost: bcrypt.MinCost}, security.RandomID, time.Now, time.Hour)
 			if err != nil {
 				t.Fatal(err)
 			}
 			var logs strings.Builder
-			router, err := httpapi.NewRouter(auth, application.NewTasks(store, security.RandomID, time.Now), httpapi.Options{Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+			router, err := httpapi.NewRouter(auth, application.NewTasksUseCase(store, security.RandomID, time.Now), httpapi.Options{Logger: slog.New(slog.NewTextHandler(&logs, nil))})
 			if err != nil {
 				t.Fatal(err)
 			}

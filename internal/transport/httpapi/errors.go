@@ -15,14 +15,24 @@ import (
 	"try_golang/internal/domain/task"
 )
 
+// maxBodyBytes は、入力を読み取る量の上限です。業務ルールとは別の、HTTP入口の容量制限です。
 const maxBodyBytes = 8192
 
+// respondError は、全ハンドラーで共通するJSONエラー形式を返し、後続処理を停止します。
+// 401には認証方式を伝えるWWW-Authenticateも付けます。
+// Abortはミドルウェアの後続実行を止めますが、現在のGo関数自体をreturnするものではありません。
 func respondError(c *gin.Context, status int, code, message string) {
 	if status == http.StatusUnauthorized {
 		c.Header("WWW-Authenticate", `Bearer realm="tasks"`)
 	}
 	c.AbortWithStatusJSON(status, gin.H{"error": gin.H{"code": code, "message": message}})
 }
+
+// fail は、ドメイン・ユースケースのエラーをHTTPステータスと公開用メッセージへ変換します。
+//
+// 内側の層はHTTPを知らず、外側のこの関数が通信上の表現を決めます。
+// %wで包まれた原因もerrors.Isで判定します。分類していない障害はログへ残し、
+// クライアントには内部の詳細を含まない500を返します。
 func fail(c *gin.Context, err error, logger *slog.Logger) {
 	switch {
 	case errors.Is(err, application.ErrUnauthenticated):
@@ -45,6 +55,12 @@ func fail(c *gin.Context, err error, logger *slog.Logger) {
 	}
 }
 
+// decode は、Content-Typeと容量を確認し、JSONをdestinationへ読み込みます。
+//
+// destinationには入力DTOのポインターを渡します。未知の項目と複数のJSON値を拒否し、
+// 不正な入力ならHTTPエラーを返してfalseにします。呼び出し側はfalseなら直ちにreturnします。
+// JSONの読み取りと業務上の検証は別です。空の項目やnullを読めた場合にも、
+// 必須値・メール形式・タイトル長などはユースケースとドメインで検証します。
 func decode(c *gin.Context, destination any) bool {
 	mediaType, _, err := mime.ParseMediaType(c.GetHeader("Content-Type"))
 	if err != nil || mediaType != "application/json" {
@@ -56,6 +72,7 @@ func decode(c *gin.Context, destination any) bool {
 	decoder.DisallowUnknownFields()
 	err = decoder.Decode(destination)
 	if err == nil {
+		// 一つ目を読めただけでは末尾に別のJSONがある可能性があるため、EOFまで確認します。
 		var extra any
 		if err = decoder.Decode(&extra); errors.Is(err, io.EOF) {
 			return true
